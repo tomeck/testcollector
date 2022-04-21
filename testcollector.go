@@ -114,30 +114,6 @@ func close(client *mongo.Client, ctx context.Context,
 	}()
 }
 
-/*
-func recordTransaction(headers http.Header, status int, request []byte, response []byte) error {
-
-	tx := Transaction{
-		Id:        primitive.NewObjectID(),
-		ApiKey:    headers.Get("Api-Key"),
-		TestRunId: headers.Get("X-TESTRUN-ID"),
-		Status:    status,
-		Request:   string(request),
-		Response:  string(response),
-		Timestamp: time.Now(),
-	}
-
-	result, err := txCollection.InsertOne(ctx, tx)
-	if err != nil {
-		fmt.Println("Error inserting document %v", err)
-	} else {
-		fmt.Println("Inserted document %v", result)
-	}
-
-	return nil
-}
-*/
-
 func findTransactionsForTestRun(testRun TestRun) ([]Transaction, error) {
 
 	// JTE TODO filter also on ApiKey
@@ -165,36 +141,7 @@ func matchTransactionsForTestRun(testRun *TestRun, transactions []Transaction) e
 	return nil
 }
 
-/*
-func test1(transaction Transaction) bool {
-
-	return matchPredicate(transaction.Request, "amount.total", "100") &&
-		matchPredicate(transaction.Request, "source.sourceType", "PaymentTrack") &&
-		matchPredicate(transaction.Request, "transactionDetails.captureFlag", "True")
-
-}
-
-func test2(transaction Transaction) bool {
-
-	return matchPredicate(transaction.Request, "amount.total", "200") &&
-		matchPredicate(transaction.Request, "source.sourceType", "PaymentTrack") &&
-		matchPredicate(transaction.Request, "transactionDetails.captureFlag", "True")
-}
-*/
-
 func matchTransactionForTestRun(testRun *TestRun, transaction Transaction) error {
-
-	/*
-		// Load the test suite associated with this testRunId
-		predicate1 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "300"}
-		predicate2 := TestCasePredicate{Attribute: "source.sourceType", ExpectedValue: "PaymentTrack"}
-		predicate3 := TestCasePredicate{Attribute: "transactionDetails.captureFlag", ExpectedValue: "True"}
-		predicate4 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "200"}
-		testCase1 := TestCase{Name: "TestCase1", Predicates: []TestCasePredicate{predicate1, predicate2, predicate3}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
-		testCase2 := TestCase{Name: "TestCase2", Predicates: []TestCasePredicate{predicate4}, ExpectedStatus: 500, Url: "/ch/payments/v1/charges"}
-		testSuite1 := TestSuite{Name: "TestSuite1", TestCases: []TestCase{testCase1, testCase2}}
-	*/
-	//fmt.Println(testSuite1)
 
 	// Iterate through all test cases in this suite
 	for _, testCase := range testRun.TestSuite.TestCases {
@@ -242,24 +189,12 @@ func matchTransactionForTestRun(testRun *TestRun, transaction Transaction) error
 			fmt.Printf("Test case %s does not match all %d predicates\n", testCase.Name, len(testCase.Predicates))
 
 		}
-
 	}
-	/*
-		if test1(transaction) {
-			fmt.Println("Transaction matches Test1")
-		} else if test2(transaction) {
-			fmt.Println("Transaction matches Test2")
-		} else {
-			fmt.Println("Unmatched transaction")
-		}
-	*/
+
 	return nil
 }
 
 func cleanse(input string) string {
-
-	// foo := strings.Trim(input, "\"")
-	// fmt.Println(foo)
 	return strings.Trim(input, "\"")
 }
 
@@ -334,4 +269,3 @@ func main() {
 	}
 	fmt.Println(testRun.Status)
 }
-
