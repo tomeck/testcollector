@@ -88,12 +88,11 @@ type TestResult struct {
 // Connect to database; get client, context and CancelFunc back
 func connect(uri string) (*mongo.Client, context.Context, context.CancelFunc, error) {
 
-	// ctx will be used to set deadline for process, here
-	// deadline will of 30 seconds.
+	// ctx is used to set db query timeout
 	ctx, cancel := context.WithTimeout(context.Background(),
 		30*time.Second)
 
-	// mongo.Connect return mongo.Client method
+	// connect to db, get client back
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	return client, ctx, cancel, err
 }
@@ -117,12 +116,18 @@ func close(client *mongo.Client, ctx context.Context,
 	}()
 }
 
+// Returns transactions for a given test run, ***in descending chronological order***
 func findTransactionsForTestRun(testRun TestRun) ([]Transaction, error) {
 
 	// JTE TODO filter also on ApiKey
+
+	// Sort by `Timestamp` field descending
+	findOptions := options.Find()
+	findOptions.SetSort(bson.D{{"_id", -1}})
+
 	filter := bson.D{{"testrunid", bson.D{{"$eq", testRun.TestRunHeaderId}}}}
 
-	cursor, err := txCollection.Find(ctx, filter)
+	cursor, err := txCollection.Find(ctx, filter, findOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -131,26 +136,26 @@ func findTransactionsForTestRun(testRun TestRun) ([]Transaction, error) {
 	if err = cursor.All(ctx, &transactions); err != nil {
 		return nil, err
 	}
+
 	return transactions, nil
 }
 
+// Check whether all the specified predicates match the given transaction
 func validatePredicatesForTransaction(predicates []TestCasePredicate, transaction Transaction) bool {
 
 	// Iterate through all predicates in this test case
 	allMatched := true
 	for _, predicate := range predicates {
 		if !matchPredicate(transaction.Request, predicate.Attribute, predicate.ExpectedValue) {
-			//fmt.Println("Predicate does not match")
 			allMatched = false
 			break
-		} else {
-			//fmt.Println("Predicate does match")
 		}
 	}
 
 	return allMatched
 }
 
+// Find the most recent transaction that matches this test case
 func matchTransactionToTestCase(testCase TestCase, transactions []Transaction) (Transaction, TestStatus, error) {
 
 	var err error
@@ -163,11 +168,6 @@ func matchTransactionToTestCase(testCase TestCase, transactions []Transaction) (
 		if transaction.Url != testCase.Url {
 			continue // nope - this is not the transaction we want
 		}
-
-		// Check whether Status matches
-		// if transaction.Status != testCase.ExpectedStatus {
-		// 	continue // nope - this is not the transaction we want
-		// }
 
 		// So far, so good - now attempt to match all predicates
 		if validatePredicatesForTransaction(testCase.Predicates, transaction) {
@@ -192,6 +192,7 @@ func matchTransactionToTestCase(testCase TestCase, transactions []Transaction) (
 	return matchingTransaction, testStatus, err
 }
 
+/*
 func matchTransactionsForTestRun(testRun *TestRun, transactions []Transaction) error {
 
 	for _, transaction := range transactions {
@@ -201,7 +202,9 @@ func matchTransactionsForTestRun(testRun *TestRun, transactions []Transaction) e
 	}
 	return nil
 }
+*/
 
+// Match transactions to each test case in this test run instance
 func matchTransactionsToTestRun(testRun *TestRun, transactions []Transaction) error {
 
 	testRunStatus := Complete
@@ -228,6 +231,7 @@ func matchTransactionsToTestRun(testRun *TestRun, transactions []Transaction) er
 	return nil
 }
 
+/*
 func testSatisfied(testRun TestRun, testCase TestCase) bool {
 	retval := false
 
@@ -241,7 +245,9 @@ func testSatisfied(testRun TestRun, testCase TestCase) bool {
 
 	return retval
 }
+*/
 
+/*
 func matchTransactionForTestRun(testRun *TestRun, transaction Transaction) error {
 
 	// Iterate through all test cases in this suite
@@ -299,6 +305,7 @@ func matchTransactionForTestRun(testRun *TestRun, transaction Transaction) error
 
 	return nil
 }
+*/
 
 func cleanse(input string) string {
 	return strings.Trim(input, "\"")
@@ -375,26 +382,39 @@ func dumpTestRunReport(testRun TestRun) {
 
 	fmt.Println("Report for Test Run>", testRun.Name)
 
-	for _, testResult := range testRun.TestResults {
-		fmt.Printf("Result for Test Case `%s`: %d\n", testResult.TestCase.Name, testResult.Status)
+	for _, testCase := range testRun.TestSuite.TestCases {
+		testResult, err := getTestResultforTestCase(testCase, testRun)
+		if err == nil {
+			if testResult.Status == Success {
+				fmt.Printf("Result for Test Case `%s`: success\n", testCase.Name)
+			} else {
+				fmt.Printf("Result for Test Case `%s`: failure\n", testCase.Name)
+			}
+		} else {
+			fmt.Printf("Result for Test Case `%s`: no transaction found\n", testCase.Name)
+		}
 	}
 
 	/*
-			for _, testCase := range testRun.TestSuite.TestCases {
-			testResult, err := getTestResultforTestCase(testCase, testRun)
-			if err == nil {
-				fmt.Printf("Result for Test Case `%s`: %d\n", testCase.Name, testResult.Status)
-			} else {
-				fmt.Println(err)
-			}
+		for _, testResult := range testRun.TestResults {
+			fmt.Printf("Result for Test Case `%s`: %d\n", testResult.TestCase.Name, testResult.Status)
 		}
+
+				for _, testCase := range testRun.TestSuite.TestCases {
+				testResult, err := getTestResultforTestCase(testCase, testRun)
+				if err == nil {
+					fmt.Printf("Result for Test Case `%s`: %d\n", testCase.Name, testResult.Status)
+				} else {
+					fmt.Println(err)
+				}
+			}
+
+		fmt.Printf("Status of this test run: %d", testRun.Status)
+
+		// for _, testResult := range testRun.TestResults {
+		// 	fmt.Printf("Result for Test Case `%s`: %d\n", testResult.TestCase.Name, testResult.Status)
+		// }
 	*/
-
-	fmt.Printf("Status of this test run: %d", testRun.Status)
-
-	// for _, testResult := range testRun.TestResults {
-	// 	fmt.Printf("Result for Test Case `%s`: %d\n", testResult.TestCase.Name, testResult.Status)
-	// }
 }
 
 // Globals
