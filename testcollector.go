@@ -2,19 +2,25 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/tidwall/gjson"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+const DSTEST_API_URL = "http://localhost:8000/dstestapi/testsuites/"
+const TEST_SUITE_ID = "627a8285b1c63cf751cfc1fd"
 
 // Connect to database; get client, context and CancelFunc back
 func connect(uri string) (*mongo.Client, context.Context, context.CancelFunc, error) {
@@ -72,7 +78,7 @@ func findTransactionsForTestRun(testRun TestRun) ([]Transaction, error) {
 }
 
 // Check whether all the specified predicates match the given transaction
-func validatePredicatesForTransaction(predicates []TestCasePredicate, transaction Transaction) bool {
+func validatePredicatesForTransaction(predicates []*TestCasePredicate, transaction Transaction) bool {
 
 	// Iterate through all predicates in this test case
 	allMatched := true
@@ -123,18 +129,6 @@ func matchTransactionToTestCase(testCase TestCase, transactions []Transaction) (
 	return matchingTransaction, testStatus, err
 }
 
-/*
-func matchTransactionsForTestRun(testRun *TestRun, transactions []Transaction) error {
-
-	for _, transaction := range transactions {
-		fmt.Println(">>>>>>>>>>>>>>>>>>>>>")
-		matchTransactionForTestRun(testRun, transaction)
-		fmt.Println("<<<<<<<<<<<<<<<<<<<<<")
-	}
-	return nil
-}
-*/
-
 // Match transactions to each test case in this test run instance
 func matchTransactionsToTestRun(testRun *TestRun, transactions []Transaction) error {
 
@@ -144,12 +138,12 @@ func matchTransactionsToTestRun(testRun *TestRun, transactions []Transaction) er
 	for _, testCase := range testRun.TestSuite.TestCases {
 
 		fmt.Println("Searching for transactions to match test case", testCase.Name)
-		transaction, testStatus, err := matchTransactionToTestCase(testCase, transactions)
+		transaction, testStatus, err := matchTransactionToTestCase(*testCase, transactions)
 
 		if err == nil {
 			fmt.Println("Found matching transaction")
-			testResult := TestResult{TestRun: *testRun, TestCase: testCase, Status: testStatus, Transaction: transaction, Timestamp: time.Now()}
-			testRun.TestResults = append(testRun.TestResults, testResult)
+			testResult := TestResult{ /*TestRun: testRun, */ TestCase: testCase, Status: testStatus, Transaction: &transaction, Timestamp: time.Now()}
+			testRun.TestResults = append(testRun.TestResults, &testResult)
 		} else {
 			// Did not find a transaction to match this test case
 			fmt.Println("Did not find matching transaction")
@@ -161,82 +155,6 @@ func matchTransactionsToTestRun(testRun *TestRun, transactions []Transaction) er
 
 	return nil
 }
-
-/*
-func testSatisfied(testRun TestRun, testCase TestCase) bool {
-	retval := false
-
-	for _, testResult := range testRun.TestResults {
-
-		if testResult.TestCase.Id == testCase.Id && testResult.Status == Success {
-			retval = true
-			break
-		}
-	}
-
-	return retval
-}
-*/
-
-/*
-func matchTransactionForTestRun(testRun *TestRun, transaction Transaction) error {
-
-	// Iterate through all test cases in this suite
-	for _, testCase := range testRun.TestSuite.TestCases {
-
-		// Check whether we already have a successful transaction against this test case
-		if testSatisfied(*testRun, testCase) {
-			fmt.Println("Test case already satisfied")
-			continue
-		}
-		fmt.Printf("---Checking transaction against test case %s\n", testCase.Name)
-
-		// Check that the Url matches
-		if testCase.Url != transaction.Url {
-			fmt.Println("Url does not match")
-			continue // no match, so skip this test case
-		} else {
-			fmt.Println("Url does match")
-		}
-
-		// Iterate through all predicates in this test case
-		allMatched := true
-		for _, predicate := range testCase.Predicates {
-			if !matchPredicate(transaction.Request, predicate.Attribute, predicate.ExpectedValue) {
-				//fmt.Println("Predicate does not match")
-				allMatched = false
-				break
-			} else {
-				//fmt.Println("Predicate does match")
-			}
-
-		}
-		if allMatched {
-			fmt.Printf("Test case %s matches all %d predicates for transaction %v\n", testCase.Name, len(testCase.Predicates), transaction.Id)
-
-			// We found the right test case matching this transaction, now determine whether the http response
-			// matches what is considered success for this test case
-			testStatus := UndefinedTestStatus
-			if testCase.ExpectedStatus == transaction.Status {
-				fmt.Printf("*** Successful test case\n")
-				testStatus = Success
-			} else {
-				fmt.Printf("*** Failed test case\n")
-				testStatus = Failure
-			}
-
-			testResult := TestResult{TestRun: *testRun, TestCase: testCase, Status: testStatus, Timestamp: time.Now()}
-			testRun.TestResults = append(testRun.TestResults, testResult)
-			return nil // we're done with this call since we matched the transaction to a test case
-		} else {
-			fmt.Printf("Test case %s does not match all %d predicates\n", testCase.Name, len(testCase.Predicates))
-
-		}
-	}
-
-	return nil
-}
-*/
 
 func cleanse(input string) string {
 	return strings.Trim(input, "\"")
@@ -258,37 +176,56 @@ func matchPredicate(requestString string, predicate string, expectedValue string
 	// Should never get here
 }
 
+func fetchTestSuite(suiteId string) TestSuite {
+
+	// Invoke the GET testsuite endpoint in the DSTest API
+	response, err := http.Get(DSTEST_API_URL + suiteId)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	//TODO JTE check whether we got a 404 or 200
+
+	// Read the response
+	responseData, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(string(responseData))
+
+	// Unmarshal the response data into a TestSuite instance
+	var testSuite TestSuite
+	json.Unmarshal(responseData, &testSuite)
+
+	return testSuite
+}
+
 func collectTestRun(testRunHeaderId string) (TestRun, error) {
 
 	// Load the test suite associated with this testRunId from config db
-	predicate1 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "300"}
-	predicate2 := TestCasePredicate{Attribute: "source.sourceType", ExpectedValue: "PaymentTrack"}
-	predicate3 := TestCasePredicate{Attribute: "transactionDetails.captureFlag", ExpectedValue: "True"}
-	predicate4 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "200"}
-	predicate5 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "900"}
-	predicate6 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "600"}
-	predicate7 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "999"}
-	testCase1 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase1", Predicates: []TestCasePredicate{predicate1, predicate2, predicate3}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
-	testCase2 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase2", Predicates: []TestCasePredicate{predicate4}, ExpectedStatus: 500, Url: "/ch/payments/v1/charges"}
-	testCase3 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase3", Predicates: []TestCasePredicate{predicate5}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
-	testCase4 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase4", Predicates: []TestCasePredicate{predicate6}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
-	testCase5 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase5", Predicates: []TestCasePredicate{predicate7}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
-	testSuite1 := TestSuite{Name: "TestSuite1", TestCases: []TestCase{testCase1, testCase2, testCase3, testCase4, testCase5}}
-	testRun := TestRun{Name: "Tom Run 1", ApiKey: "apikey000001", TestRunHeaderId: testRunHeaderId, TestSuite: testSuite1, Status: InProgress, Timestamp: time.Now()}
+	testSuite := fetchTestSuite(TEST_SUITE_ID)
+
+	/*
+		predicate1 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "300"}
+		predicate2 := TestCasePredicate{Attribute: "source.sourceType", ExpectedValue: "PaymentTrack"}
+		predicate3 := TestCasePredicate{Attribute: "transactionDetails.captureFlag", ExpectedValue: "True"}
+		predicate4 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "200"}
+		predicate5 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "900"}
+		predicate6 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "600"}
+		predicate7 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "999"}
+		testCase1 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase1", Predicates: []*TestCasePredicate{&predicate1, &predicate2, &predicate3}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
+		testCase2 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase2", Predicates: []*TestCasePredicate{&predicate4}, ExpectedStatus: 500, Url: "/ch/payments/v1/charges"}
+		testCase3 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase3", Predicates: []*TestCasePredicate{&predicate5}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
+		testCase4 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase4", Predicates: []*TestCasePredicate{&predicate6}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
+		testCase5 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase5", Predicates: []*TestCasePredicate{&predicate7}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
+		testSuite1 := TestSuite{Name: "TestSuite1", TestCases: []*TestCase{&testCase1, &testCase2, &testCase3, &testCase4, &testCase5}}
+	*/
+	testRun := TestRun{Name: "Tom Run 1", ApiKey: "apikey000001", TestRunHeaderId: testRunHeaderId, TestSuite: &testSuite, Status: InProgress, Timestamp: time.Now()}
 
 	transactions, err := findTransactionsForTestRun(testRun)
 	if err != nil {
 		return TestRun{}, err
 	}
-
-	/*
-		err = matchTransactionsForTestRun(&testRun, transactions)
-
-		// Check if all test cases have been satisfied
-		if len(testRun.TestResults) == len(testRun.TestSuite.TestCases) {
-			testRun.Status = Complete
-		}
-	*/
 
 	err = matchTransactionsToTestRun(&testRun, transactions)
 
@@ -301,7 +238,7 @@ func getTestResultforTestCase(testCase TestCase, testRun TestRun) (TestResult, e
 	// Find the test result matching the specified Test Case
 	for _, testResult := range testRun.TestResults {
 		if testResult.TestCase.Id == testCase.Id {
-			return testResult, nil
+			return *testResult, nil
 		}
 
 	}
@@ -314,7 +251,7 @@ func dumpTestRunReport(testRun TestRun) {
 	fmt.Println("Report for Test Run>", testRun.Name)
 
 	for _, testCase := range testRun.TestSuite.TestCases {
-		testResult, err := getTestResultforTestCase(testCase, testRun)
+		testResult, err := getTestResultforTestCase(*testCase, testRun)
 		if err == nil {
 			if testResult.Status == Success {
 				fmt.Printf("Result for Test Case `%s`: success\n", testCase.Name)
@@ -325,27 +262,13 @@ func dumpTestRunReport(testRun TestRun) {
 			fmt.Printf("Result for Test Case `%s`: no transaction found\n", testCase.Name)
 		}
 	}
+}
 
-	/*
-		for _, testResult := range testRun.TestResults {
-			fmt.Printf("Result for Test Case `%s`: %d\n", testResult.TestCase.Name, testResult.Status)
-		}
+func persistTestRun(testRun TestRun) error {
 
-				for _, testCase := range testRun.TestSuite.TestCases {
-				testResult, err := getTestResultforTestCase(testCase, testRun)
-				if err == nil {
-					fmt.Printf("Result for Test Case `%s`: %d\n", testCase.Name, testResult.Status)
-				} else {
-					fmt.Println(err)
-				}
-			}
+	_, err := testRunsCollection.InsertOne(context.TODO(), testRun)
 
-		fmt.Printf("Status of this test run: %d", testRun.Status)
-
-		// for _, testResult := range testRun.TestResults {
-		// 	fmt.Printf("Result for Test Case `%s`: %d\n", testResult.TestCase.Name, testResult.Status)
-		// }
-	*/
+	return err
 }
 
 // Globals
@@ -355,6 +278,7 @@ var ctx context.Context
 var cancel context.CancelFunc
 var db *mongo.Database
 var txCollection *mongo.Collection
+var testRunsCollection *mongo.Collection
 
 func main() {
 
@@ -371,7 +295,8 @@ func main() {
 	// Get target database and collection
 	db = client.Database("dstest")
 	txCollection = db.Collection("transactions")
-	fmt.Println("Initialized db and collection")
+	testRunsCollection = db.Collection("testruns")
+	fmt.Println("Initialized db and collections")
 
 	// Prepare to collect results for a given TestRun
 	testRun, err := collectTestRun("1234567890123456")
@@ -379,6 +304,9 @@ func main() {
 		fmt.Println("Error during run collection", err)
 		panic(err)
 	}
+
+	// Persist the test run to db
+	persistTestRun(testRun)
 
 	dumpTestRunReport(testRun)
 }
