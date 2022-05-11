@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -23,7 +22,7 @@ import (
 const DSTEST_RUNS_API_URL = "http://localhost:8000/dstestapi/testruns/"
 
 // const TEST_SUITE_ID = "627a8285b1c63cf751cfc1fd"
-const TESTRUN_ID = "627ab98d12367842f1f69560"
+const TESTRUN_ID = "627ababe12367842f1f69561"
 
 // const TESTRUN_HEADER_ID = "1234567890123456"
 
@@ -207,28 +206,33 @@ func fetchTestSuite(suiteId string) TestSuite {
 }
 */
 
-func fetchTestRun(testRunId string) TestRun {
+func fetchTestRun(testRunId string) (TestRun, error) {
+
+	// The return value
+	var testRun TestRun
 
 	// Invoke the GET test run endpoint in the DSTest API
 	response, err := http.Get(DSTEST_RUNS_API_URL + testRunId)
 	if err != nil {
-		log.Fatalln(err)
+		return testRun, err
 	}
 
 	//TODO JTE check whether we got a 404 or 200
+	if response.StatusCode > 200 {
+		return testRun, errors.New("Test Run not found")
+	}
 
 	// Read the response
 	responseData, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		log.Fatal(err)
+		return testRun, err
 	}
 	fmt.Println(string(responseData))
 
-	// Unmarshal the response data into a TestSuite instance
-	var testRun TestRun
+	// Unmarshal the response data into a TestRun instance
 	json.Unmarshal(responseData, &testRun)
 
-	return testRun
+	return testRun, nil
 }
 
 func collectTestRun(testRunId string) (TestRun, error) {
@@ -237,7 +241,10 @@ func collectTestRun(testRunId string) (TestRun, error) {
 	// testSuite := fetchTestSuite(DSTEST_RUNS_API_URL)
 
 	// Load the test run with the specified id from db
-	testRun := fetchTestRun(testRunId)
+	testRun, err := fetchTestRun(testRunId)
+	if err != nil {
+		return TestRun{}, err
+	}
 
 	/*
 		predicate1 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "300"}
@@ -284,25 +291,54 @@ func dumpTestRunReport(testRun TestRun) {
 
 	fmt.Println("Report for Test Run>", testRun.Name)
 
+	numSuccess := 0
+	numAttempted := 0
+
 	for _, testCase := range testRun.TestSuite.TestCases {
 		testResult, err := getTestResultforTestCase(*testCase, testRun)
 		if err == nil {
+			numAttempted += 1
 			if testResult.Status == Success {
-				fmt.Printf("Result for Test Case `%s`: success\n", testCase.Name)
+				numSuccess += 1
+				fmt.Printf("\tResult for Test Case `%s`: success\n", testCase.Name)
 			} else {
-				fmt.Printf("Result for Test Case `%s`: failure\n", testCase.Name)
+				fmt.Printf("\tResult for Test Case `%s`: failure\n", testCase.Name)
 			}
 		} else {
-			fmt.Printf("Result for Test Case `%s`: no transaction found\n", testCase.Name)
+			fmt.Printf("\tResult for Test Case `%s`: no transaction found\n", testCase.Name)
 		}
 	}
+
+	fmt.Println("\tNumber of tests attempted:", numAttempted, "of total", len(testRun.TestSuite.TestCases))
+	fmt.Println("\tNumber of tests successfully completed:", numSuccess, "of total", len(testRun.TestSuite.TestCases))
+	fmt.Println("\tStatus of test run:", testRun.Status)
 }
 
 func persistTestRun(testRun TestRun) error {
 
-	_, err := testRunsCollection.InsertOne(context.TODO(), testRun)
+	// TODO JTE is there a better way to update this document in place?
+	// What's being updated is the array of TestResults and maybe the status
 
-	return err
+	delResponse, err := testRunsCollection.DeleteOne(ctx, bson.M{"_id": testRun.Id})
+	fmt.Println("Delete Reponse is", delResponse)
+	if err != nil {
+		return err
+	}
+
+	// TODO JTE check whether the test run is complete
+	if len(testRun.TestResults) == len(testRun.TestSuite.TestCases) {
+		testRun.Status = Complete
+	} else {
+		testRun.Status = InProgress
+	}
+
+	insertResponse, err := testRunsCollection.InsertOne(ctx, testRun)
+	fmt.Println("Insert Reponse is", insertResponse)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Globals
@@ -335,8 +371,8 @@ func main() {
 	// Prepare to collect results for a given TestRun
 	testRun, err := collectTestRun(TESTRUN_ID)
 	if err != nil {
-		fmt.Println("Error during run collection", err)
-		panic(err)
+		fmt.Println("Error during run collection:", err)
+		return
 	}
 
 	// Persist the test run to db
