@@ -52,6 +52,7 @@ type TestRun struct {
 	Id              primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
 	Name            string             `json:"name,omitempty" validate:"required"`
 	ApiKey          string             `json:"apikey,omitempty" validate:"required"`
+	MID             string             `json:"mid,omitempty" validate:"required"`
 	TestRunHeaderId string             `json:"header_id,omitempty" validate:"required"`
 	TestSuite       *TestSuite         `json:"test_suite,omitempty" validate:"required"`
 	TestResults     []*TestResult      `json:"test_results,omitempty" validate:"required"`

@@ -19,8 +19,13 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const DSTEST_API_URL = "http://localhost:8000/dstestapi/testsuites/"
-const TEST_SUITE_ID = "627a8285b1c63cf751cfc1fd"
+// const DSTEST_SUITES_API_URL = "http://localhost:8000/dstestapi/testsuites/"
+const DSTEST_RUNS_API_URL = "http://localhost:8000/dstestapi/testruns/"
+
+// const TEST_SUITE_ID = "627a8285b1c63cf751cfc1fd"
+const TESTRUN_ID = "627ab98d12367842f1f69560"
+
+// const TESTRUN_HEADER_ID = "1234567890123456"
 
 // Connect to database; get client, context and CancelFunc back
 func connect(uri string) (*mongo.Client, context.Context, context.CancelFunc, error) {
@@ -176,10 +181,11 @@ func matchPredicate(requestString string, predicate string, expectedValue string
 	// Should never get here
 }
 
+/*
 func fetchTestSuite(suiteId string) TestSuite {
 
 	// Invoke the GET testsuite endpoint in the DSTest API
-	response, err := http.Get(DSTEST_API_URL + suiteId)
+	response, err := http.Get(DSTEST_SUITES_API_URL + suiteId)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -199,11 +205,39 @@ func fetchTestSuite(suiteId string) TestSuite {
 
 	return testSuite
 }
+*/
 
-func collectTestRun(testRunHeaderId string) (TestRun, error) {
+func fetchTestRun(testRunId string) TestRun {
+
+	// Invoke the GET test run endpoint in the DSTest API
+	response, err := http.Get(DSTEST_RUNS_API_URL + testRunId)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	//TODO JTE check whether we got a 404 or 200
+
+	// Read the response
+	responseData, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(string(responseData))
+
+	// Unmarshal the response data into a TestSuite instance
+	var testRun TestRun
+	json.Unmarshal(responseData, &testRun)
+
+	return testRun
+}
+
+func collectTestRun(testRunId string) (TestRun, error) {
 
 	// Load the test suite associated with this testRunId from config db
-	testSuite := fetchTestSuite(TEST_SUITE_ID)
+	// testSuite := fetchTestSuite(DSTEST_RUNS_API_URL)
+
+	// Load the test run with the specified id from db
+	testRun := fetchTestRun(testRunId)
 
 	/*
 		predicate1 := TestCasePredicate{Attribute: "amount.total", ExpectedValue: "300"}
@@ -220,7 +254,7 @@ func collectTestRun(testRunHeaderId string) (TestRun, error) {
 		testCase5 := TestCase{Id: primitive.NewObjectID(), Name: "TestCase5", Predicates: []*TestCasePredicate{&predicate7}, ExpectedStatus: 201, Url: "/ch/payments/v1/charges"}
 		testSuite1 := TestSuite{Name: "TestSuite1", TestCases: []*TestCase{&testCase1, &testCase2, &testCase3, &testCase4, &testCase5}}
 	*/
-	testRun := TestRun{Name: "Tom Run 1", ApiKey: "apikey000001", TestRunHeaderId: testRunHeaderId, TestSuite: &testSuite, Status: InProgress, Timestamp: time.Now()}
+	//testRun := TestRun{Name: "Tom Run 1", ApiKey: "apikey000001", TestRunHeaderId: testRunHeaderId, TestSuite: &testSuite, Status: InProgress, Timestamp: time.Now()}
 
 	transactions, err := findTransactionsForTestRun(testRun)
 	if err != nil {
@@ -299,7 +333,7 @@ func main() {
 	fmt.Println("Initialized db and collections")
 
 	// Prepare to collect results for a given TestRun
-	testRun, err := collectTestRun("1234567890123456")
+	testRun, err := collectTestRun(TESTRUN_ID)
 	if err != nil {
 		fmt.Println("Error during run collection", err)
 		panic(err)
