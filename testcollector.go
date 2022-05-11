@@ -13,6 +13,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -227,7 +228,7 @@ func fetchTestRun(testRunId string) (TestRun, error) {
 	if err != nil {
 		return testRun, err
 	}
-	fmt.Println(string(responseData))
+	//fmt.Println(string(responseData))
 
 	// Unmarshal the response data into a TestRun instance
 	json.Unmarshal(responseData, &testRun)
@@ -319,8 +320,7 @@ func persistTestRun(testRun TestRun) error {
 	// TODO JTE is there a better way to update this document in place?
 	// What's being updated is the array of TestResults and maybe the status
 
-	delResponse, err := testRunsCollection.DeleteOne(ctx, bson.M{"_id": testRun.Id})
-	fmt.Println("Delete Reponse is", delResponse)
+	_, err := testRunsCollection.DeleteOne(ctx, bson.M{"_id": testRun.Id})
 	if err != nil {
 		return err
 	}
@@ -332,13 +332,67 @@ func persistTestRun(testRun TestRun) error {
 		testRun.Status = InProgress
 	}
 
-	insertResponse, err := testRunsCollection.InsertOne(ctx, testRun)
-	fmt.Println("Insert Reponse is", insertResponse)
+	_, err = testRunsCollection.InsertOne(ctx, testRun)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+/*
+	Name: Test Case 1
+	URL: /ch/payments/v1/charges
+	Expected Status Code: 201
+	Criteria:
+	amount.total = 300 AND
+	source.sourceType = "PaymentTrack" AND
+	transactionDetails.captureFlag = True
+*/
+func prettyFormatTestCase(testCase TestCase) string {
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, "Test Case Name: %s\n", testCase.Name)
+	fmt.Fprintf(&sb, "URL: %s\n", testCase.Url)
+	fmt.Fprintf(&sb, "Expected Status Code: %d\n", testCase.ExpectedStatus)
+	fmt.Fprintf(&sb, "Criteria:\n")
+
+	// Pretty format all the predicates
+	for index, predicate := range testCase.Predicates {
+		fmt.Fprintf(&sb, "\t%s == %s", predicate.Attribute, predicate.ExpectedValue)
+
+		if index < len(testCase.Predicates)-1 {
+			fmt.Fprintf(&sb, " AND\n")
+		} else {
+			fmt.Fprintf(&sb, "\n")
+		}
+	}
+
+	return sb.String()
+}
+
+func prettyFormatTestSuite(testSuiteId string) (string, error) {
+	var sb strings.Builder
+	var testsuite TestSuite
+
+	id, _ := primitive.ObjectIDFromHex(testSuiteId)
+
+	// Fetch the specified TestSuite
+	filter := bson.M{"_id": id}
+	err := testSuitesCollection.FindOne(ctx, filter).Decode(&testsuite)
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Fprintf(&sb, "Test Suite Name: %s\n\n", testsuite.Name)
+
+	// Pretty format all the test cases
+	for _, testCase := range testsuite.TestCases {
+		sb.WriteString(prettyFormatTestCase((*testCase)))
+		sb.WriteString("\n")
+	}
+
+	return sb.String(), nil
 }
 
 // Globals
@@ -349,6 +403,7 @@ var cancel context.CancelFunc
 var db *mongo.Database
 var txCollection *mongo.Collection
 var testRunsCollection *mongo.Collection
+var testSuitesCollection *mongo.Collection
 
 func main() {
 
@@ -366,6 +421,7 @@ func main() {
 	db = client.Database("dstest")
 	txCollection = db.Collection("transactions")
 	testRunsCollection = db.Collection("testruns")
+	testSuitesCollection = db.Collection("testsuites")
 	fmt.Println("Initialized db and collections")
 
 	// Prepare to collect results for a given TestRun
@@ -379,4 +435,7 @@ func main() {
 	persistTestRun(testRun)
 
 	dumpTestRunReport(testRun)
+
+	prettyString, err := prettyFormatTestSuite("627a8285b1c63cf751cfc1fd")
+	fmt.Println(prettyString)
 }
