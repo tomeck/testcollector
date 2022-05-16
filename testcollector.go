@@ -26,7 +26,7 @@ import (
 const DSTEST_RUNS_API_URL = "http://localhost:8000/dstestapi/testruns/"
 
 // const TEST_SUITE_ID = "627a8285b1c63cf751cfc1fd"
-const TESTRUN_ID = "62828e4072277df7cd3a4254"
+const TESTRUN_ID = "6282a6d7f27b6017ce33fa83"
 
 // const TESTRUN_HEADER_ID = "1234567890123456"
 
@@ -139,7 +139,11 @@ func matchTransactionToTestCase(testCase TestCase, transactions []Transaction) (
 
 			// This transaction matches all checks, so don't need to keep looking
 			matchingTransaction = transaction
-			break
+
+			// Actually, break only if this transaction was successful, otherwise keep looking for successful match
+			if testStatus == Success {
+				break
+			}
 		}
 	}
 
