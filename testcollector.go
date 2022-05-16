@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -17,13 +18,15 @@ import (
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"github.com/ucarion/urlpath"
 )
 
 // const DSTEST_SUITES_API_URL = "http://localhost:8000/dstestapi/testsuites/"
 const DSTEST_RUNS_API_URL = "http://localhost:8000/dstestapi/testruns/"
 
 // const TEST_SUITE_ID = "627a8285b1c63cf751cfc1fd"
-const TESTRUN_ID = "627ababe12367842f1f69561"
+const TESTRUN_ID = "62828e4072277df7cd3a4254"
 
 // const TESTRUN_HEADER_ID = "1234567890123456"
 
@@ -97,6 +100,19 @@ func validatePredicatesForTransaction(predicates []*TestCasePredicate, transacti
 	return allMatched
 }
 
+func urlMatches(url string, urlPattern string) bool {
+
+	// Check for exact match
+	if url == urlPattern {
+		return true
+	}
+
+	path := urlpath.New(urlPattern)
+	_, ok := path.Match(url)
+
+	return ok
+}
+
 // Find the most recent transaction that matches this test case
 func matchTransactionToTestCase(testCase TestCase, transactions []Transaction) (Transaction, TestStatus, error) {
 
@@ -107,7 +123,8 @@ func matchTransactionToTestCase(testCase TestCase, transactions []Transaction) (
 	for _, transaction := range transactions {
 
 		// Check whether URL matches
-		if transaction.Url != testCase.Url {
+		// if transaction.Url != testCase.Url {
+		if !urlMatches(transaction.Url, testCase.Url) {
 			continue // nope - this is not the transaction we want
 		}
 
@@ -405,14 +422,25 @@ var txCollection *mongo.Collection
 var testRunsCollection *mongo.Collection
 var testSuitesCollection *mongo.Collection
 
+// const DB_CONNECTION_STRING = "mongodb://localhost:27017"
+
+const DB_CONNECTION_STRING = "mongodb+srv://admin:Ngokman3#@cluster0.mce8u.mongodb.net/dstest?retryWrites=true&w=majority"
+
 func main() {
 
 	// Initialize database (hardcoded for local machine)
-	client, ctx, cancel, err := connect("mongodb://localhost:27017")
+	serverAPIOptions := options.ServerAPI(options.ServerAPIVersion1)
+	clientOptions := options.Client().
+		ApplyURI(DB_CONNECTION_STRING).
+		SetServerAPIOptions(serverAPIOptions)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
+	fmt.Println("x1Connected to mongo at", DB_CONNECTION_STRING)
 	// Close db when the main function is returned.
 	defer close(client, ctx, cancel)
 	fmt.Println("Connected to local mongodb")
