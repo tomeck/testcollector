@@ -22,11 +22,11 @@ import (
 	"github.com/ucarion/urlpath"
 )
 
-// const DSTEST_SUITES_API_URL = "http://localhost:8000/dstestapi/testsuites/"
-const DSTEST_RUNS_API_URL = "http://localhost:8000/dstestapi/testruns/"
+// const DSTEST_RUNS_API_URL = "http://localhost:8000/dstestapi/testruns/"
+const DSTEST_RUNS_API_URL = "http://dstestapi-env.eba-qun7jypp.us-east-2.elasticbeanstalk.com/dstestapi/testruns/"
 
 // const TEST_SUITE_ID = "627a8285b1c63cf751cfc1fd"
-const TESTRUN_ID = "6282a6d7f27b6017ce33fa83"
+const TESTRUN_ID = "628505b594e3d92ff244a749"
 
 // const TESTRUN_HEADER_ID = "1234567890123456"
 
